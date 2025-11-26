@@ -2,7 +2,7 @@ services:
   app:
     build: 
       context: .
-      target: app  # Явно указываем stage
+      target: app
     container_name: anime_app
     restart: unless-stopped
     depends_on:
@@ -16,11 +16,9 @@ services:
     environment:
       NODE_ENV: production
       TZ: Europe/Moscow
+      WEBAPP_URL: ${WEBAPP_URL:-http://localhost:3000}
     volumes:
       - ./temp:/app/temp
-      # Удалите монтирование всего проекта в production
-      # - .:/app
-      # - /app/node_modules
     ports:
       - "3000:3000"
     networks:
@@ -42,7 +40,7 @@ services:
   worker:
     build:
       context: .
-      target: worker  # Явно указываем stage
+      target: worker
     container_name: anime_worker
     restart: unless-stopped
     depends_on:
@@ -76,7 +74,6 @@ services:
           cpus: '1'
           memory: 1G
 
-  # Остальные сервисы без изменений...
   telegram-api:
     image: aiogram/telegram-bot-api:latest
     container_name: local_tg_api

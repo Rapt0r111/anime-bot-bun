@@ -86,13 +86,6 @@ export class WorkerMetrics {
       retries: 0,
     };
   }
-
-  startPeriodicLogging(): NodeJS.Timeout {
-    return setInterval(() => {
-      const stats = this.getStats();
-      logger.log('[Metrics]', JSON.stringify(stats, null, 2));
-    }, WORKER_CONFIG.METRICS_LOG_INTERVAL);
-  }
 }
 
 export const metrics = new WorkerMetrics();
