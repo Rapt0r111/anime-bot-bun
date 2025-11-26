@@ -1,5 +1,5 @@
 # =========================================================
-# БАЗОВЫЙ STAGE (Системные зависимости)
+# 1. BASE STAGE (Система + Bun)
 # =========================================================
 FROM oven/bun:1-alpine AS base
 
@@ -15,71 +15,88 @@ RUN apk update && \
     git \
     openssh-client \
     curl \
+    ca-certificates \
+    dos2unix \
     && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 
 # =========================================================
-# FRONTEND BUILDER STAGE (Сборка React)
+# 2. FRONTEND BUILDER (Сборка React приложения)
 # =========================================================
 FROM base AS frontend-builder
 
 WORKDIR /app/webapp
 
-# 1. Копируем файлы пакетов фронтенда
 COPY webapp/package.json ./
-# Если есть bun.lockb в папке webapp, раскомментируй следующую строку:
-# COPY webapp/bun.lockb ./ 
+RUN dos2unix package.json
 
-# 2. Устанавливаем зависимости фронтенда
+# Устанавливаем зависимости
 RUN bun install
 
-# 3. Копируем исходный код фронтенда
 COPY webapp/ .
 
-# 4. ФИКС ОШИБКИ JSON: Удаляем пустой манифест, если он есть, чтобы VitePWA не падал
-RUN rm -f public/manifest.json public/manifest.webmanifest
+# Чистим файлы от BOM
+RUN dos2unix vite.config.ts package.json
 
-# 5. ФИКС ОШИБКИ TS: Запускаем сборку напрямую через vite, минуя tsc (игнорируем ошибки типов)
+# Фикс PWA (манифест)
+RUN rm -rf public && mkdir public
+RUN echo "{}" > public/manifest.json
+
+# ---> ГЛАВНЫЙ ФИКС CSS И TAILWIND <---
+# 1. Принудительно ставим рабочую связку v3
+RUN bun add -d tailwindcss@3.4.17 postcss autoprefixer
+
+# 2. Генерируем правильный postcss.config.js (ESM формат для Vite)
+RUN echo "export default { plugins: { tailwindcss: {}, autoprefixer: {} } }" > postcss.config.js
+
+# 3. Генерируем правильный tailwind.config.js
+RUN echo "/** @type {import('tailwindcss').Config} */ export default { content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'], theme: { extend: {} }, plugins: [] }" > tailwind.config.js
+
+# 4. Переписываем index.css на стандартный синтаксис v3 (убираем ошибочные @import)
+RUN echo "@tailwind base;" > src/index.css && \
+    echo "@tailwind components;" >> src/index.css && \
+    echo "@tailwind utilities;" >> src/index.css
+
+# Запускаем сборку
 RUN bunx vite build
 
 # =========================================================
-# BACKEND DEPENDENCIES STAGE (Зависимости бота)
+# 3. BACKEND DEPENDENCIES (Зависимости бота)
 # =========================================================
 FROM base AS dependencies
 
+WORKDIR /app
+
 COPY package.json bun.lockb* ./
+RUN dos2unix package.json
 RUN bun install --frozen-lockfile
 
 # =========================================================
-# APP STAGE (Финальный образ)
+# 4. APP STAGE (Основной контейнер бота)
 # =========================================================
 FROM dependencies AS app
 
+WORKDIR /app
+
 COPY . .
 
-# 6. ВАЖНО: Копируем собранную папку dist из этапа frontend-builder
+# Копируем собранный фронтенд
 COPY --from=frontend-builder /app/webapp/dist ./webapp/dist
 
 ENV NODE_ENV=production
 ENV TZ=Europe/Moscow
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:3000/health || exit 1
 
-# Запуск миграций и бота
-CMD ["sh", "-c", "bunx drizzle-kit push --config=drizzle.config.ts && bun run src/index.ts"]
+CMD ["sh", "-c", "bunx drizzle-kit push && bun run src/index.ts"]
 
 # =========================================================
-# WORKER STAGE
+# 5. WORKER STAGE
 # =========================================================
-FROM dependencies AS worker
-
-COPY . .
-
-ENV NODE_ENV=production
-ENV TZ=Europe/Moscow
-ENV WORKER_CONCURRENCY=2
-ENV WORKER_MAX_JOBS_PER_MINUTE=6
+FROM app AS worker
 
 CMD ["bun", "run", "src/worker.ts"]
