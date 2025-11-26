@@ -2,10 +2,9 @@ services:
   app:
     build: 
       context: .
-      target: app
+      target: app  # Явно указываем stage
     container_name: anime_app
     restart: unless-stopped
-    command: sh -c "bunx drizzle-kit push --config=drizzle.config.ts && bun run src/index.ts"
     depends_on:
       postgres:
         condition: service_healthy
@@ -18,17 +17,12 @@ services:
       NODE_ENV: production
       TZ: Europe/Moscow
     volumes:
-      - .:/app
-      - /app/node_modules
       - ./temp:/app/temp
+      # Удалите монтирование всего проекта в production
+      # - .:/app
+      # - /app/node_modules
     ports:
       - "3000:3000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     networks:
       - anime_network
     logging:
@@ -48,10 +42,9 @@ services:
   worker:
     build:
       context: .
-      target: worker
+      target: worker  # Явно указываем stage
     container_name: anime_worker
     restart: unless-stopped
-    command: ["bun", "run", "src/worker.ts"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,12 +56,9 @@ services:
     environment:
       NODE_ENV: production
       TZ: Europe/Moscow
-      # КРИТИЧНО: Ограничиваем concurrency для стабильности
       WORKER_CONCURRENCY: "2"
       WORKER_MAX_JOBS_PER_MINUTE: "6"
     volumes:
-      - .:/app
-      - /app/node_modules
       - ./temp:/var/lib/telegram-bot-api/shared
     networks:
       - anime_network
@@ -86,6 +76,7 @@ services:
           cpus: '1'
           memory: 1G
 
+  # Остальные сервисы без изменений...
   telegram-api:
     image: aiogram/telegram-bot-api:latest
     container_name: local_tg_api
@@ -101,19 +92,6 @@ services:
       - "8081:8081"
     networks:
       - anime_network
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
 
   postgres:
     image: postgres:16-alpine
@@ -133,44 +111,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
     networks:
       - anime_network
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "2"
-    command: >
-      postgres
-      -c shared_buffers=256MB
-      -c effective_cache_size=1GB
-      -c maintenance_work_mem=128MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
-      -c default_statistics_target=100
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c work_mem=16MB
-      -c min_wal_size=1GB
-      -c max_wal_size=4GB
-      -c max_connections=100
-      -c log_min_duration_statement=1000
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
 
   redis:
     image: redis:7-alpine
     container_name: anime_redis
     restart: unless-stopped
-    environment:
-      TZ: "${TZ:-Europe/Moscow}"
     volumes:
       - redis_data:/data
     ports:
@@ -182,11 +129,6 @@ services:
       retries: 5
     networks:
       - anime_network
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "2"
     command: >
       redis-server
       --save 60 1000
@@ -194,18 +136,6 @@ services:
       --appendfsync everysec
       --maxmemory 512mb
       --maxmemory-policy allkeys-lru
-      --tcp-backlog 511
-      --timeout 300
-      --tcp-keepalive 300
-      --maxclients 10000
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 768M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
 
 networks:
   anime_network:
@@ -213,8 +143,5 @@ networks:
 
 volumes:
   pg_data:
-    driver: local
   redis_data:
-    driver: local
   telegram-data:
-    driver: local

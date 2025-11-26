@@ -4,6 +4,7 @@ import * as cheerio from 'cheerio';
 import axios, { AxiosError } from 'axios';
 import { logger } from '../utils/logger';
 import { PARSER_CONFIG } from '../config/constants';
+import { CircuitBreaker } from '../utils/circuit-breaker';
 
 const MIRROR_DOMAIN = PARSER_CONFIG.MIRROR_DOMAIN;
 const BASE_URL = `https://${MIRROR_DOMAIN}`;
@@ -57,10 +58,25 @@ export class ParserError extends Error {
     constructor(
         message: string,
         public readonly code: string,
-        public readonly retryable: boolean = false
+        public readonly retryable: boolean = false,
+        public readonly statusCode?: number
     ) {
         super(message);
         this.name = 'ParserError';
+    }
+
+    static fromAxiosError(err: AxiosError): ParserError {
+        const status = err.response?.status;
+
+        if (status === 429) {
+            return new ParserError('Rate limited', 'RATE_LIMIT', true, status);
+        }
+
+        if (status && status >= 500) {
+            return new ParserError('Server error', 'SERVER_ERROR', true, status);
+        }
+
+        return new ParserError('Request failed', 'NETWORK_ERROR', true, status);
     }
 }
 
@@ -138,61 +154,10 @@ function truncateForLog(input: string | undefined | null): string {
 }
 
 // Улучшенная функция с retry и обработкой ошибок
-async function fetchHtml(url: string, options: any = {}): Promise<string> {
-    let lastError: Error | null = null;
+const parserCircuitBreaker = new CircuitBreaker();
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-            const response = await axios.get(url, {
-                ...options,
-                headers: { ...HEADERS, ...options.headers },
-                timeout: 15000,
-                validateStatus: (status) => status < 500 // Retry только на 5xx
-            });
-
-            // Проверка на капчу/блокировку
-            if (response.data.includes('captcha') || response.data.includes('cloudflare')) {
-                throw new ParserError(
-                    'Captcha or CloudFlare protection detected',
-                    'CAPTCHA_DETECTED',
-                    false
-                );
-            }
-
-            return response.data;
-        } catch (err) {
-            lastError = err as Error;
-
-            // Логика повторных попыток
-            if (axios.isAxiosError(err)) {
-                const axiosError = err as AxiosError;
-
-                // Не повторяем при 4xx (кроме 429)
-                if (axiosError.response?.status &&
-                    axiosError.response.status >= 400 &&
-                    axiosError.response.status < 500 &&
-                    axiosError.response.status !== 429) {
-                    throw new ParserError(
-                        `HTTP ${axiosError.response.status}`,
-                        'HTTP_CLIENT_ERROR',
-                        false
-                    );
-                }
-            }
-
-            if (attempt < MAX_RETRIES - 1) {
-                const delay = RETRY_DELAYS[attempt] || 4000;
-                logger.warn(`[Parser] Retry ${attempt + 1}/${MAX_RETRIES} after ${delay}ms`);
-                await new Promise(r => setTimeout(r, delay));
-            }
-        }
-    }
-
-    throw new ParserError(
-        `Failed after ${MAX_RETRIES} attempts: ${lastError?.message}`,
-        'MAX_RETRIES_EXCEEDED',
-        true
-    );
+export async function fetchHtml(url: string): Promise<string> {
+  return parserCircuitBreaker.execute(() => axios.get(url).then(r => r.data));
 }
 
 // ==================== LATEST ANIME ====================
@@ -506,7 +471,7 @@ export async function extractVideoUrl(
 
         const frameHtml = frameResponse.data;
 
-        if (frameHtml.includes('недоступен по просьбе правообладателей') || 
+        if (frameHtml.includes('недоступен по просьбе правообладателей') ||
             frameHtml.includes('на територии РФ')) {
             logger.warn(`[Parser] Geo-block detected for ID ${targetId}`);
             throw new ParserError(

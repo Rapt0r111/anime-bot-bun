@@ -30,10 +30,13 @@ import { registerBotCommands } from './bot/utils/register-commands';
 
 // API Server
 import { startApiServer } from './api';
+import { rateLimiterMiddleware } from './bot/middlewares/rate-limiter.middleware';
 
 // ==================== SETUP MIDDLEWARES ====================
 bot.use(subscriberMiddleware);
 bot.use(errorHandlerMiddleware);
+bot.use(rateLimiterMiddleware);
+
 
 // ==================== REGISTER COMMANDS ====================
 bot.command('start', handleStartCommand);
