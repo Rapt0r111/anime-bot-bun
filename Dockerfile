@@ -28,8 +28,8 @@ FROM base AS frontend-builder
 
 WORKDIR /app/webapp
 
-COPY webapp/package.json ./
-RUN dos2unix package.json
+COPY webapp/package.json webapp/bun.lockb* ./
+RUN dos2unix package.json 2>/dev/null || true
 
 # Устанавливаем зависимости
 RUN bun install
@@ -37,43 +37,53 @@ RUN bun install
 COPY webapp/ .
 
 # Чистим файлы от BOM
-RUN dos2unix vite.config.ts package.json
+RUN dos2unix vite.config.ts package.json 2>/dev/null || true
 
-# Фикс PWA (манифест)
-RUN rm -rf public && mkdir public
-RUN echo "{}" > public/manifest.json
+# ГЛАВНЫЙ ФИКС: Используем Tailwind CSS v3 вместо v4 alpha
+RUN bun remove tailwindcss && \
+    bun add -d tailwindcss@^3.4.1 postcss@^8.4.35 autoprefixer@^10.4.18
 
-# ---> ГЛАВНЫЙ ФИКС CSS И TAILWIND <---
-# 1. Принудительно ставим рабочую связку v3
-RUN bun add -d tailwindcss@3.4.17 postcss autoprefixer
+# Создаем правильные конфиги для Tailwind v3
+RUN echo "/** @type {import('tailwindcss').Config} */" > tailwind.config.js && \
+    echo "export default {" >> tailwind.config.js && \
+    echo "  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}']," >> tailwind.config.js && \
+    echo "  theme: { extend: {} }," >> tailwind.config.js && \
+    echo "  plugins: []" >> tailwind.config.js && \
+    echo "}" >> tailwind.config.js
 
-# 2. Генерируем правильный postcss.config.js (ESM формат для Vite)
-RUN echo "export default { plugins: { tailwindcss: {}, autoprefixer: {} } }" > postcss.config.js
+# PostCSS config
+RUN echo "export default {" > postcss.config.js && \
+    echo "  plugins: {" >> postcss.config.js && \
+    echo "    tailwindcss: {}," >> postcss.config.js && \
+    echo "    autoprefixer: {}" >> postcss.config.js && \
+    echo "  }" >> postcss.config.js && \
+    echo "}" >> postcss.config.js
 
-# 3. Генерируем правильный tailwind.config.js
-RUN echo "/** @type {import('tailwindcss').Config} */ export default { content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'], theme: { extend: {} }, plugins: [] }" > tailwind.config.js
-
-# 4. Переписываем index.css на стандартный синтаксис v3 (убираем ошибочные @import)
+# CSS с правильным синтаксисом
 RUN echo "@tailwind base;" > src/index.css && \
     echo "@tailwind components;" >> src/index.css && \
     echo "@tailwind utilities;" >> src/index.css
 
-# Запускаем сборку
-RUN bunx vite build
+# Создаем public с манифестом
+RUN mkdir -p public && \
+    echo '{"name":"AnimeVost","short_name":"Anime","theme_color":"#7c3aed"}' > public/manifest.json
+
+# Собираем фронтенд
+RUN bun run build
 
 # =========================================================
-# 3. BACKEND DEPENDENCIES (Зависимости бота)
+# 3. BACKEND DEPENDENCIES
 # =========================================================
 FROM base AS dependencies
 
 WORKDIR /app
 
 COPY package.json bun.lockb* ./
-RUN dos2unix package.json
+RUN dos2unix package.json 2>/dev/null || true
 RUN bun install --frozen-lockfile
 
 # =========================================================
-# 4. APP STAGE (Основной контейнер бота)
+# 4. APP STAGE (Основной контейнер)
 # =========================================================
 FROM dependencies AS app
 

@@ -1,5 +1,4 @@
-﻿import type { Config } from 'tailwindcss';
-
+﻿/** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   darkMode: 'class',
@@ -18,15 +17,6 @@ export default {
           800: '#5b21b6',
           900: '#4c1d95',
           950: '#2e1065'
-        },
-        tg: {
-          bg: 'var(--tg-theme-bg-color)',
-          text: 'var(--tg-theme-text-color)',
-          hint: 'var(--tg-theme-hint-color)',
-          link: 'var(--tg-theme-link-color)',
-          button: 'var(--tg-theme-button-color)',
-          buttonText: 'var(--tg-theme-button-text-color)',
-          secondaryBg: 'var(--tg-theme-secondary-bg-color)'
         }
       },
       animation: {
@@ -56,4 +46,4 @@ export default {
     }
   },
   plugins: []
-} satisfies Config;
+}
