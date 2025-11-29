@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Loader2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import { useHapticFeedback } from '@telegram-apps/sdk-react';
 import { api } from '../lib/api';
 import AnimeCard from '../components/AnimeCard';
@@ -11,10 +10,8 @@ export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
   const haptic = useHapticFeedback();
 
-  // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedQuery(query);
@@ -35,13 +32,14 @@ export default function SearchPage() {
 
   const handleClear = () => {
     setQuery('');
-    haptic?.impactOccurred('light');
+    if (haptic) {
+      haptic.impactOccurred('light');
+    }
     inputRef.current?.focus();
   };
 
   return (
     <div className="min-h-screen pb-20">
-      {/* Search Bar */}
       <motion.div
         className="sticky top-0 z-10 bg-slate-950/80 backdrop-blur-xl border-b border-purple-500/20"
         initial={{ y: -50, opacity: 0 }}
@@ -75,10 +73,8 @@ export default function SearchPage() {
         </div>
       </motion.div>
 
-      {/* Results */}
       <div className="max-w-7xl mx-auto px-4 py-6">
         <AnimatePresence mode="wait">
-          {/* Loading */}
           {isLoading && (
             <motion.div
               key="loading"
@@ -91,7 +87,6 @@ export default function SearchPage() {
             </motion.div>
           )}
 
-          {/* No Query */}
           {!query && !isLoading && (
             <motion.div
               key="empty"
@@ -105,7 +100,6 @@ export default function SearchPage() {
             </motion.div>
           )}
 
-          {/* No Results */}
           {debouncedQuery && !isLoading && results?.length === 0 && (
             <motion.div
               key="no-results"
@@ -120,7 +114,6 @@ export default function SearchPage() {
             </motion.div>
           )}
 
-          {/* Results Grid */}
           {results && results.length > 0 && (
             <motion.div
               key="results"
@@ -140,9 +133,7 @@ export default function SearchPage() {
                     anime={{
                       title: anime.title,
                       url: anime.url,
-                      // Search APIs usually return 'image' instead of 'imageUrl'
-                      // We cast it here and provide a fallback description
-                      imageUrl: (anime as any).image || (anime as any).imageUrl,
+                      imageUrl: (anime as any).image || (anime as any).imageUrl || '',
                       description: '' 
                     }} 
                   />

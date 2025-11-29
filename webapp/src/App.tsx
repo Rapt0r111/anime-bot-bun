@@ -1,6 +1,7 @@
 ﻿import { useEffect, Suspense, lazy } from 'react';
 import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { 
+  SDKProvider,
   useBackButton, 
   useViewport, 
   useThemeParams,
@@ -17,60 +18,68 @@ const SearchPage = lazy(() => import('./pages/SearchPage'));
 const AnimePage = lazy(() => import('./pages/AnimePage'));
 const DownloadsPage = lazy(() => import('./pages/DownloadsPage'));
 
-export default function App() {
-  const viewport = useViewport();
-  const themeParams = useThemeParams();
+function AppContent() {
   const miniApp = useMiniApp();
+  const themeParams = useThemeParams();
+  const viewport = useViewport();
   const backButton = useBackButton();
   const initData = useInitData();
-  
-  // Use React Router hooks for navigation handling
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Expand viewport
+    // Expand viewport to full screen
     if (viewport) {
       viewport.expand();
     }
+  }, [viewport]);
 
+  useEffect(() => {
     // Apply theme
     if (themeParams) {
-      // Fix: Provide a fallback value (null) if the property is undefined
       document.documentElement.style.setProperty(
         '--tg-theme-bg-color',
-        themeParams.bgColor || null
+        themeParams.bgColor || '#0f172a'
       );
       document.documentElement.style.setProperty(
         '--tg-theme-text-color',
-        themeParams.textColor || null
+        themeParams.textColor || '#ffffff'
+      );
+      document.documentElement.style.setProperty(
+        '--tg-theme-button-color',
+        themeParams.buttonColor || '#7c3aed'
       );
     }
+  }, [themeParams]);
 
-    // Ready
+  useEffect(() => {
+    // Set ready state
     if (miniApp) {
       miniApp.ready();
     }
-  }, [viewport, themeParams, miniApp]);
+  }, [miniApp]);
 
   useEffect(() => {
     if (backButton) {
-      // Check current path using useLocation
-      if (location.pathname === '/' || location.pathname === '') {
+      const isRoot = location.pathname === '/' || location.pathname === '';
+      
+      if (isRoot) {
         backButton.hide();
       } else {
         backButton.show();
+        const handleClick = () => navigate(-1);
+        backButton.on('click', handleClick);
+        return () => backButton.off('click', handleClick);
       }
-
-      // Handle back button click
-      const handleBack = () => navigate(-1);
-      backButton.on('click', handleBack);
-
-      return () => {
-        backButton.off('click', handleBack);
-      };
     }
   }, [backButton, location, navigate]);
+
+  // Log init data for debugging
+  useEffect(() => {
+    if (initData) {
+      console.log('[Telegram] Init Data:', initData);
+    }
+  }, [initData]);
 
   return (
     <ErrorBoundary>
@@ -87,5 +96,13 @@ export default function App() {
         </Suspense>
       </div>
     </ErrorBoundary>
+  );
+}
+
+export default function App() {
+  return (
+    <SDKProvider acceptCustomStyles>
+      <AppContent />
+    </SDKProvider>
   );
 }

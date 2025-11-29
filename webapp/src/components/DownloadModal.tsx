@@ -4,7 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useHapticFeedback, useMainButton } from '@telegram-apps/sdk-react';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { useDownloadStore } from '@/store/downloadStore';
+import { useDownloadStore } from '../store/downloadStore';
 
 interface Props {
   episode: { name: string; id: string };
@@ -23,9 +23,10 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
     mutationFn: () => api.downloadEpisode(pageUrl, episode.id, episode.name),
     onMutate: () => {
       setStatus('downloading');
-      haptic?.notificationOccurred('success');
+      if (haptic) {
+        haptic.notificationOccurred('success');
+      }
       
-      // Add to downloads store
       addDownload({
         id: Date.now().toString(),
         animeName,
@@ -37,7 +38,9 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
     },
     onSuccess: () => {
       setStatus('success');
-      haptic?.notificationOccurred('success');
+      if (haptic) {
+        haptic.notificationOccurred('success');
+      }
       
       setTimeout(() => {
         onClose();
@@ -45,7 +48,9 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
     },
     onError: () => {
       setStatus('error');
-      haptic?.notificationOccurred('error');
+      if (haptic) {
+        haptic.notificationOccurred('error');
+      }
     }
   });
 
@@ -59,11 +64,9 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
         downloadMutation.mutate();
       };
       
-      // Change .onClick to .on('click', ...)
       mainButton.on('click', onClick);
       
       return () => {
-        // Change .offClick to .off('click', ...)
         mainButton.off('click', onClick);
         mainButton.hide();
       };
@@ -77,7 +80,6 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
     >
-      {/* Backdrop */}
       <motion.div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         initial={{ opacity: 0 }}
@@ -85,7 +87,6 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
         onClick={onClose}
       />
 
-      {/* Modal */}
       <motion.div
         className="relative w-full max-w-lg bg-slate-900 rounded-t-3xl border-t border-purple-500/30 overflow-hidden"
         initial={{ y: '100%' }}
@@ -93,7 +94,6 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
         exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 30, stiffness: 300 }}
       >
-        {/* Close Button */}
         <button
           onClick={onClose}
           className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center hover:bg-slate-700 transition-colors z-10"
@@ -102,7 +102,6 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
         </button>
 
         <div className="p-6 pb-8">
-          {/* Icon */}
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center">
             {status === 'idle' && <Download className="w-8 h-8 text-white" />}
             {status === 'downloading' && <Loader2 className="w-8 h-8 text-white animate-spin" />}
@@ -110,7 +109,6 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
             {status === 'error' && <AlertCircle className="w-8 h-8 text-white" />}
           </div>
 
-          {/* Title */}
           <h3 className="text-xl font-bold text-white text-center mb-2">
             {animeName}
           </h3>
@@ -119,7 +117,6 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
             {episode.name}
           </p>
 
-          {/* Status Message */}
           <motion.div
             className="text-center"
             initial={{ opacity: 0, y: 10 }}
@@ -158,7 +155,6 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
             )}
           </motion.div>
 
-          {/* Quality Badge */}
           <div className="mt-6 flex items-center justify-center gap-2">
             <div className="px-3 py-1 bg-purple-600/20 rounded-full text-purple-300 text-xs font-medium">
               1080p HD

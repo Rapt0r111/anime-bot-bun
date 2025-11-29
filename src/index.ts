@@ -13,6 +13,7 @@ import { handleLatestCommand } from './bot/handlers/commands/latest.handler';
 import { handleSearchCommand } from './bot/handlers/commands/search.handler';
 import { handleStatsCommand } from './bot/handlers/commands/stats.handler';
 import { handleTopCommand } from './bot/handlers/commands/top.handler';
+import { handleWebAppCommand } from './bot/handlers/commands/webapp.handler';
 
 // Callback handlers
 import { handleLatestListCallback } from './bot/handlers/callbacks/latest-list.handler';
@@ -44,6 +45,8 @@ bot.command('latest', handleLatestCommand);
 bot.command('search', handleSearchCommand);
 bot.command('stats', handleStatsCommand);
 bot.command('top', handleTopCommand);
+bot.command('app', handleWebAppCommand);
+
 
 // ==================== REGISTER CALLBACKS ====================
 bot.callbackQuery('latest_list', handleLatestListCallback);
