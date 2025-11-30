@@ -16,11 +16,11 @@ services:
     environment:
       NODE_ENV: production
       TZ: Europe/Moscow
-      WEBAPP_URL: ${WEBAPP_URL:-http://localhost:3000}
+      WEBAPP_URL: ${WEBAPP_URL:-https://rapt0rs.duckdns.org}
     volumes:
       - ./temp:/app/temp
     ports:
-      - "3000:3000"
+      - "80:8080"
     networks:
       - anime_network
     logging:

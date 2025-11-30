@@ -100,7 +100,7 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:3000/health || exit 1
+  CMD curl -f https://rapt0rs.duckdns.org/health || exit 1
 
 CMD ["sh", "-c", "bunx drizzle-kit push && bun run src/index.ts"]
 

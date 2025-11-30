@@ -15,9 +15,11 @@ export function startApiServer() {
     // CORS для WebApp
     .use(
       cors({
-        origin: process.env.NODE_ENV === 'production'
-          ? ['https://your-webapp-domain.com']
-          : true,
+        origin: [
+          'http://rapt0rs.duckdns.org',
+          'https://rapt0rs.duckdns.org',
+          'http://localhost:5173'
+        ],
         credentials: true
       })
     )
@@ -72,7 +74,7 @@ export function startApiServer() {
       set.status = 404;
       return 'Not found';
     })
-    .listen(3000);
+    .listen(80);
 
   logger.log(`[API] Server running on port ${app.server?.port}`);
   logger.log(`[API] WebApp API endpoints available at /api/*`);

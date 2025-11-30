@@ -2,7 +2,7 @@
 import type { BotContext } from '../../../types';
 
 export async function handleWebAppCommand(ctx: BotContext) {
-  const webAppUrl = process.env.WEBAPP_URL || 'http://localhost:3000';
+  const webAppUrl = process.env.WEBAPP_URL || 'https://rapt0rs.duckdns.org';
   
   await ctx.reply('🎬 Откройте наше веб-приложение:', {
     reply_markup: {

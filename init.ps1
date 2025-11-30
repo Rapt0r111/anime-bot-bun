@@ -125,7 +125,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'https://rapt0rs.duckdns.org',
         changeOrigin: true
       }
     }
@@ -450,6 +450,6 @@ Write-Host "   $YELLOW bun run build $NC   - Build for production"
 Write-Host ""
 Write-Host "$BLUE URLs:$NC"
 Write-Host "   Development: $YELLOW http://localhost:5173 $NC"
-Write-Host "   Production:  $YELLOW http://localhost:3000 $NC"
+Write-Host "   Production:  $YELLOW https://rapt0rs.duckdns.org $NC"
 Write-Host ""
 Write-Host "$GREEN Happy coding! $NC"

@@ -1,22 +1,33 @@
 ﻿import type { AnimeCard, AnimePageData, SearchResult } from '../types';
 
-const API_BASE = import.meta.env.DEV ? 'http://localhost:3000' : '';
+// КРИТИЧНО: Определяем базовый URL для API
+const API_BASE = import.meta.env.DEV 
+  ? 'http://localhost' 
+  : 'http://rapt0rs.duckdns.org'; // Ваш production URL
 
 class ApiClient {
   private async fetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers
+    const url = `${API_BASE}${endpoint}`;
+    console.log('[API] Fetching:', url);
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options?.headers
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
       }
-    });
 
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.statusText}`);
+      return response.json();
+    } catch (error) {
+      console.error('[API] Request failed:', error);
+      throw error;
     }
-
-    return response.json();
   }
 
   async getLatest(): Promise<AnimeCard[]> {
