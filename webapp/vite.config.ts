@@ -22,7 +22,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://rapt0rs.duckdns.org',
+        target: 'https://rapt0rs.duckdns.org', 
         changeOrigin: true
       }
     }

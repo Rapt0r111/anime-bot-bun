@@ -101,7 +101,7 @@ function AppContent() {
 
 export default function App() {
   return (
-    <SDKProvider acceptCustomStyles>
+    <SDKProvider acceptCustomStyles debug>
       <AppContent />
     </SDKProvider>
   );

@@ -3,7 +3,7 @@
 // КРИТИЧНО: Определяем базовый URL для API
 const API_BASE = import.meta.env.DEV 
   ? 'http://localhost' 
-  : 'http://rapt0rs.duckdns.org'; // Ваш production URL
+  : 'https://rapt0rs.duckdns.org';
 
 class ApiClient {
   private async fetch<T>(endpoint: string, options?: RequestInit): Promise<T> {

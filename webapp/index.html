@@ -5,7 +5,7 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     
-    <!-- Telegram WebApp -->
+    <!-- Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     
     <!-- PWA Meta Tags -->
@@ -15,12 +15,33 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     
+    <!-- Security -->
+    <meta http-equiv="Content-Security-Policy" 
+          content="default-src 'self' https:; 
+                   script-src 'self' 'unsafe-inline' https://telegram.org; 
+                   style-src 'self' 'unsafe-inline'; 
+                   img-src 'self' data: https:; 
+                   connect-src 'self' https://rapt0rs.duckdns.org https://telegram.org;">
+    
     <!-- Open Graph -->
     <meta property="og:title" content="AnimeVost Downloader" />
     <meta property="og:description" content="Download anime in 1080p quality" />
     <meta property="og:type" content="website" />
     
     <title>AnimeVost Downloader</title>
+    
+    <!-- Telegram WebApp Init -->
+    <script>
+      // Initialize Telegram Web App ASAP
+      if (window.Telegram && window.Telegram.WebApp) {
+        console.log('[Telegram] Web App SDK loaded');
+        window.Telegram.WebApp.ready();
+        window.Telegram.WebApp.expand();
+        console.log('[Telegram] Init data:', window.Telegram.WebApp.initData);
+      } else {
+        console.warn('[Telegram] Web App SDK not found');
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
