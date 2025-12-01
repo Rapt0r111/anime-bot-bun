@@ -1,4 +1,4 @@
-// src/worker.ts
+// src/worker.ts - ОПТИМИЗИРОВАННАЯ ВЕРСИЯ
 import { Worker, Job } from 'bullmq';
 import { bot, db } from './core';
 import { episodes } from './db/schema';
@@ -12,26 +12,9 @@ import { Readable } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
 import { logger } from './utils/logger';
-import { redis } from 'bun';
+import { DOWNLOAD_CONFIG, WORKER_CONFIG, PATHS } from './config/constants';
 
-const SHARED_DIR = '/var/lib/telegram-bot-api/shared';
-const MAX_ATTEMPTS = 5;
-const DOWNLOAD_TIMEOUT = 180_000; // 3 минуты
-const STALL_CHECK_INTERVAL = 15_000; // 15 секунд
-const MIN_FILE_SIZE = 1024 * 1024; // 1 MB
-const STATUS_UPDATE_THROTTLE = 3000;
-const RETRY_DELAYS = [3000, 5000, 10000, 20000]; // Прогрессивная задержка
-const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB Telegram limit
-
-const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Referer': 'https://animevost.org/',
-    'Origin': 'https://animevost.org',
-    'Accept': '*/*',
-    'Connection': 'keep-alive',
-    'Accept-Encoding': 'identity'
-};
-
+// ==================== TYPES ====================
 interface JobData {
     recordId: number;
     pageUrl: string;
@@ -43,15 +26,11 @@ interface JobData {
     startMsgId?: number;
 }
 
-interface StatusUpdater {
-    (text: string, force?: boolean): Promise<void>;
-}
-
-interface DownloadResult {
-    success: boolean;
-    filePath: string;
-    fileSize: number;
-    downloadTime: number;
+interface DownloadProgress {
+    totalBytes: number;
+    downloadedBytes: number;
+    startTime: number;
+    lastUpdate: number;
 }
 
 // ==================== METRICS ====================
@@ -98,47 +77,21 @@ class WorkerMetrics {
             ? Math.round(this.stats.totalUploadTime / this.stats.successJobs)
             : 0;
 
-        const totalGB = (this.stats.totalBytes / 1024 / 1024 / 1024).toFixed(2);
-
         return {
             ...this.stats,
             avgDownloadTime,
             avgUploadTime,
-            totalGB,
+            totalGB: (this.stats.totalBytes / 1024 / 1024 / 1024).toFixed(2),
             successRate: this.stats.totalJobs > 0
                 ? Math.round((this.stats.successJobs / this.stats.totalJobs) * 100)
                 : 0
-        };
-    }
-
-    reset(): void {
-        this.stats = {
-            totalJobs: 0,
-            successJobs: 0,
-            failedJobs: 0,
-            totalDownloadTime: 0,
-            totalUploadTime: 0,
-            totalBytes: 0,
-            retries: 0
         };
     }
 }
 
 const metrics = new WorkerMetrics();
 
-// Логирование каждые 10 минут
-setInterval(() => {
-    const stats = metrics.getStats();
-    logger.log('[Metrics]', JSON.stringify(stats, null, 2));
-}, 10 * 60 * 1000);
-
 // ==================== UTILITIES ====================
-function drawProgressBar(percent: number, width: number = 10): string {
-    const filled = Math.round(width * (percent / 100));
-    const empty = width - filled;
-    return '█'.repeat(filled) + '░'.repeat(empty);
-}
-
 function formatBytes(bytes: number): string {
     return (bytes / 1024 / 1024).toFixed(1);
 }
@@ -148,10 +101,14 @@ function formatSpeed(bytesPerSecond: number): string {
     return mbps >= 1 ? `${mbps.toFixed(1)} MB/s` : `${(mbps * 1024).toFixed(0)} KB/s`;
 }
 
-function createStatusUpdater(
-    chatId: number,
-    initialMsgId?: number
-): StatusUpdater {
+function drawProgressBar(percent: number, width: number = 10): string {
+    const filled = Math.round(width * (percent / 100));
+    const empty = width - filled;
+    return '█'.repeat(filled) + '░'.repeat(empty);
+}
+
+// ==================== STATUS UPDATER ====================
+function createStatusUpdater(chatId: number, initialMsgId?: number) {
     let statusMsgId: number | undefined = initialMsgId;
     let lastUpdateTime = 0;
     let lastText = '';
@@ -160,9 +117,8 @@ function createStatusUpdater(
         try {
             const now = Date.now();
 
-            // Избегаем дублирования
             if (!force && text === lastText) return;
-            if (!force && (now - lastUpdateTime) < STATUS_UPDATE_THROTTLE) return;
+            if (!force && (now - lastUpdateTime) < WORKER_CONFIG.STATUS_UPDATE_THROTTLE) return;
 
             if (!statusMsgId) {
                 const msg = await bot.api.sendMessage(chatId, text, {
@@ -183,6 +139,7 @@ function createStatusUpdater(
     };
 }
 
+// ==================== FILE OPERATIONS ====================
 async function ensureDirectory(dirPath: string): Promise<void> {
     try {
         await fs.access(dirPath);
@@ -210,30 +167,28 @@ async function setFilePermissions(filePath: string): Promise<void> {
     }
 }
 
-// ==================== DOWNLOAD WITH RESUME ====================
+// ==================== DOWNLOAD WITH RETRY ====================
 async function downloadVideo(
     urls: string[],
     tempFilePath: string,
     quality: string,
-    updateStatus: StatusUpdater
-): Promise<DownloadResult> {
+    updateStatus: ReturnType<typeof createStatusUpdater>
+): Promise<{ fileSize: number; downloadTime: number }> {
     const startTime = Date.now();
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    for (let attempt = 1; attempt <= DOWNLOAD_CONFIG.MAX_ATTEMPTS; attempt++) {
         const urlIndex = (attempt - 1) % urls.length;
         const url = urls[urlIndex];
 
-        if (!url) {
-            throw new Error('URL is undefined');
-        }
+        if (!url) throw new Error('URL is undefined');
 
         await cleanupFile(tempFilePath);
-        logger.log(`[Download] Attempt ${attempt}/${MAX_ATTEMPTS}: ${url.substring(0, 50)}...`);
+        logger.log(`[Download] Attempt ${attempt}/${DOWNLOAD_CONFIG.MAX_ATTEMPTS}: Mirror ${urlIndex + 1}`);
 
         try {
             await updateStatus(
                 `📥 <b>Скачивание...</b>\n` +
-                `Попытка ${attempt}/${MAX_ATTEMPTS}\n` +
+                `Попытка ${attempt}/${DOWNLOAD_CONFIG.MAX_ATTEMPTS}\n` +
                 `Качество: <b>${quality}</b>\n` +
                 `Зеркало: ${urlIndex + 1}/${urls.length}`,
                 true
@@ -243,11 +198,18 @@ async function downloadVideo(
             const timeoutId = setTimeout(() => {
                 logger.warn('[Download] Timeout triggered');
                 controller.abort();
-            }, DOWNLOAD_TIMEOUT);
+            }, DOWNLOAD_CONFIG.TIMEOUT);
 
             const response = await fetch(url, {
                 signal: controller.signal,
-                headers: HEADERS
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Referer': 'https://animevost.org/',
+                    'Origin': 'https://animevost.org',
+                    'Accept': '*/*',
+                    'Connection': 'keep-alive',
+                    'Accept-Encoding': 'identity'
+                }
             });
 
             clearTimeout(timeoutId);
@@ -258,80 +220,76 @@ async function downloadVideo(
 
             const contentType = response.headers.get('content-type') || '';
             if (contentType.includes('html') || contentType.includes('text')) {
-                throw new Error('Invalid content type (probably error page)');
+                throw new Error('Invalid content type (error page)');
             }
 
             const totalBytes = Number(response.headers.get('content-length')) || 0;
 
-            // Проверка размера
-            if (totalBytes > MAX_FILE_SIZE) {
-                throw new Error(`File too large: ${formatBytes(totalBytes)} MB (limit: 2048 MB)`);
+            if (totalBytes > DOWNLOAD_CONFIG.MAX_FILE_SIZE) {
+                throw new Error(`File too large: ${formatBytes(totalBytes)} MB`);
             }
 
-            let downloadedBytes = 0;
+            const progress: DownloadProgress = {
+                totalBytes,
+                downloadedBytes: 0,
+                startTime: Date.now(),
+                lastUpdate: Date.now()
+            };
+
             let lastCheckedBytes = 0;
-            let lastProgressUpdate = Date.now();
             const speedSamples: number[] = [];
 
-            // Stall detection
             const stallInterval = setInterval(() => {
-                if (downloadedBytes === lastCheckedBytes && downloadedBytes > 0) {
+                if (progress.downloadedBytes === lastCheckedBytes && progress.downloadedBytes > 0) {
                     logger.warn('[Download] Stalled detected');
                     controller.abort();
                 }
-                lastCheckedBytes = downloadedBytes;
-            }, STALL_CHECK_INTERVAL);
+                lastCheckedBytes = progress.downloadedBytes;
+            }, DOWNLOAD_CONFIG.STALL_CHECK_INTERVAL);
 
             const fileStream = createWriteStream(tempFilePath);
-
             fileStream.on('error', (err: NodeJS.ErrnoException) => {
                 if (err.code === 'ENOSPC') {
-                    logger.error('[Worker] Disk full!');
-                    throw new Error('Server storage full. Try again later.');
+                    throw new Error('Server storage full');
                 }
                 throw err;
             });
+
             const readable = Readable.fromWeb(response.body as any);
 
-            // Progress tracking
             readable.on('data', (chunk: Buffer) => {
-                downloadedBytes += chunk.length;
+                progress.downloadedBytes += chunk.length;
 
                 const now = Date.now();
-                if (totalBytes && now - lastProgressUpdate > 2000) {
-                    const percent = Math.round((downloadedBytes / totalBytes) * 100);
-                    const mb = formatBytes(downloadedBytes);
-                    const totalMb = formatBytes(totalBytes);
-                    const speed = downloadedBytes / ((now - startTime) / 1000);
+                if (totalBytes && now - progress.lastUpdate > 2000) {
+                    const percent = Math.round((progress.downloadedBytes / totalBytes) * 100);
+                    const speed = progress.downloadedBytes / ((now - progress.startTime) / 1000);
 
-                    // Сглаживание скорости
                     speedSamples.push(speed);
                     if (speedSamples.length > 5) speedSamples.shift();
                     const avgSpeed = speedSamples.reduce((a, b) => a + b, 0) / speedSamples.length;
 
                     const eta = totalBytes > 0 && avgSpeed > 0
-                        ? Math.round((totalBytes - downloadedBytes) / avgSpeed)
+                        ? Math.round((totalBytes - progress.downloadedBytes) / avgSpeed)
                         : 0;
 
                     updateStatus(
                         `📥 <b>Скачивание...</b>\n` +
-                        `Попытка ${attempt}/${MAX_ATTEMPTS} (${quality})\n` +
+                        `Попытка ${attempt}/${DOWNLOAD_CONFIG.MAX_ATTEMPTS} (${quality})\n` +
                         `<code>[${drawProgressBar(percent)}] ${percent}%</code>\n` +
-                        `📦 ${mb} / ${totalMb} MB\n` +
-                        `⚡ ${formatSpeed(avgSpeed)}` +
-                        (eta > 0 ? ` • ETA: ${eta}s` : '')
+                        `📦 ${formatBytes(progress.downloadedBytes)} / ${formatBytes(totalBytes)} MB\n` +
+                        `⚡ ${formatSpeed(avgSpeed)}${eta > 0 ? ` • ETA: ${eta}s` : ''}`
                     ).catch(() => { });
 
-                    lastProgressUpdate = now;
+                    progress.lastUpdate = now;
                 }
             });
 
             await finished(readable.pipe(fileStream));
             clearInterval(stallInterval);
 
-            // Verify
             const stats = await fs.stat(tempFilePath);
-            if (stats.size < MIN_FILE_SIZE) {
+            if (stats.size < DOWNLOAD_CONFIG.MIN_FILE_SIZE) {
                 throw new Error(`File too small: ${stats.size} bytes`);
             }
 
@@ -341,8 +299,6 @@ async function downloadVideo(
             logger.log(`[Download] ✅ Success! Size: ${formatBytes(stats.size)} MB in ${(downloadTime / 1000).toFixed(1)}s`);
 
             return {
-                success: true,
-                filePath: tempFilePath,
                 fileSize: stats.size,
                 downloadTime
             };
@@ -353,15 +309,15 @@ async function downloadVideo(
 
             metrics.recordRetry();
 
-            if (attempt < MAX_ATTEMPTS) {
-                const delay = RETRY_DELAYS[attempt - 1] || 20000;
+            if (attempt < DOWNLOAD_CONFIG.MAX_ATTEMPTS) {
+                const delay = DOWNLOAD_CONFIG.RETRY_DELAYS[attempt - 1] || 20000;
                 logger.log(`[Download] Waiting ${delay}ms before retry...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
     }
 
-    throw new Error(`Download failed after ${MAX_ATTEMPTS} attempts across ${urls.length} mirror(s)`);
+    throw new Error(`Download failed after ${DOWNLOAD_CONFIG.MAX_ATTEMPTS} attempts`);
 }
 
 // ==================== DATABASE ====================
@@ -395,23 +351,18 @@ async function processJob(job: Job<JobData>): Promise<void> {
     } = job.data;
 
     const targetChatId = chatId || userId;
-    logger.log(`[Worker] === JOB ${job.id}: ${epName} ===`);
-    logger.log(`[Worker] Debug IDs -> User: ${userId}, Chat: ${chatId}, Target: ${targetChatId}`);
+    logger.log(`[Worker] Processing Job ${job.id}: ${epName} for User ${userId}`);
 
+    // ВАЛИДАЦИЯ
     if (!targetChatId || targetChatId === 0) {
-        const err = `Invalid Target Chat ID: ${targetChatId}. Job data missing valid userId or chatId.`;
-        logger.error(`[Worker] ❌ FATAL: ${err}`);
-
-        // Помечаем в базе как ошибку, если есть recordId
-        if (recordId) {
-            await updateDatabase(recordId, {
-                isProcessing: false,
-                hasError: true,
-                errorMessage: "Internal Error: User ID missing"
-            });
-        }
-        // Завершаем выполнение, не скачивая файл
-        return;
+        const err = `Invalid Chat ID: ${targetChatId}`;
+        logger.error(`[Worker] ${err}`);
+        await updateDatabase(recordId, {
+            isProcessing: false,
+            hasError: true,
+            errorMessage: "Internal Error: Invalid user"
+        });
+        throw new Error(err);
     }
 
     const updateStatus = createStatusUpdater(targetChatId, startMsgId);
@@ -419,13 +370,10 @@ async function processJob(job: Job<JobData>): Promise<void> {
     const jobStartTime = Date.now();
 
     try {
-        // Step 1: Parse
+        // STEP 1: Parse video URL
         await updateStatus(`🔍 <b>Парсинг...</b>\n${epName}`, true);
 
-        const { directUrls, name, quality } = await extractVideoUrl(
-            pageUrl,
-            forcedVideoId
-        );
+        const { directUrls, name, quality } = await extractVideoUrl(pageUrl, forcedVideoId);
 
         if (!directUrls?.length) {
             throw new Error('No video links found');
@@ -438,11 +386,11 @@ async function processJob(job: Job<JobData>): Promise<void> {
             quality: quality
         });
 
-        // Step 2: Download
+        // STEP 2: Download
         const fileName = `anime_${recordId}_${Date.now()}.mp4`;
-        tempFilePath = path.join(SHARED_DIR, fileName);
+        tempFilePath = path.join(PATHS.SHARED_DIR, fileName);
 
-        await ensureDirectory(SHARED_DIR);
+        await ensureDirectory(PATHS.SHARED_DIR);
 
         const { fileSize, downloadTime } = await downloadVideo(
             directUrls,
@@ -453,9 +401,9 @@ async function processJob(job: Job<JobData>): Promise<void> {
 
         await setFilePermissions(tempFilePath);
 
-        // Step 3: Upload
+        // STEP 3: Upload to Telegram
         const sizeMB = formatBytes(fileSize);
-        logger.log(`[Worker] Uploading... Size: ${sizeMB} MB`);
+        logger.log(`[Worker] Uploading ${sizeMB} MB to Telegram...`);
 
         await updateStatus(
             `📤 <b>Загрузка в Telegram...</b>\n` +
@@ -490,14 +438,14 @@ async function processJob(job: Job<JobData>): Promise<void> {
 
         logger.log(`[Worker] ✅ Upload complete in ${(uploadTime / 1000).toFixed(1)}s`);
 
-        // Cleanup status
+        // Cleanup status message
         if (startMsgId) {
             try {
                 await bot.api.deleteMessage(targetChatId, startMsgId);
             } catch { }
         }
 
-        // Update DB
+        // Update DB with file ID
         if (message.video?.file_id) {
             await updateDatabase(recordId, {
                 isProcessing: false,
@@ -514,7 +462,7 @@ async function processJob(job: Job<JobData>): Promise<void> {
 
         const totalTime = Date.now() - jobStartTime;
         logger.log(
-            `[Worker] ✅ Job completed in ${(totalTime / 1000).toFixed(1)}s ` +
+            `[Worker] ✅ Job ${job.id} completed in ${(totalTime / 1000).toFixed(1)}s ` +
             `(Download: ${(downloadTime / 1000).toFixed(1)}s, Upload: ${(uploadTime / 1000).toFixed(1)}s)`
         );
 
@@ -522,7 +470,7 @@ async function processJob(job: Job<JobData>): Promise<void> {
         const errorMsg = err instanceof Error ? err.message : 'Unknown error';
         const isParserError = err instanceof ParserError;
 
-        logger.error(`[Worker] ❌ FATAL:`, errorMsg);
+        logger.error(`[Worker] ❌ Job ${job.id} failed:`, errorMsg);
 
         await updateDatabase(recordId, {
             isProcessing: false,
@@ -534,25 +482,27 @@ async function processJob(job: Job<JobData>): Promise<void> {
             ? new InlineKeyboard().text('🔙 Назад', `select|${backKey}|0`)
             : undefined;
 
-        // Пользовательские сообщения об ошибках
         let userMsg = `❌ <b>Ошибка:</b>\n`;
 
         if (isParserError) {
             const pe = err as ParserError;
-            if (pe.code === 'CAPTCHA_DETECTED') {
-                userMsg += 'Сайт требует капчу. Попробуйте позже.';
-            } else if (pe.code === 'NO_VIDEO_URLS') {
-                userMsg += 'Видео не найдено на странице.';
-            } else if (pe.code === 'GEO_BLOCK') {
-                userMsg += '🔒 <b>Доступ ограничен правообладателем.</b>\nСервер не может скачать это видео из-за региональных ограничений (РФ).';
-            }
-            else {
-                userMsg += pe.message;
+            switch (pe.code) {
+                case 'CAPTCHA_DETECTED':
+                    userMsg += 'Сайт требует капчу. Попробуйте позже.';
+                    break;
+                case 'NO_HIGH_QUALITY_URLS':
+                    userMsg += 'Видео высокого качества не найдено.';
+                    break;
+                case 'GEO_BLOCK':
+                    userMsg += 'Видео заблокировано правообладателем.';
+                    break;
+                default:
+                    userMsg += pe.message;
             }
         } else if (errorMsg.includes('too large')) {
-            userMsg += 'Файл слишком большой (>2GB). Telegram не поддерживает.';
+            userMsg += 'Файл слишком большой (>2GB).';
         } else if (errorMsg.includes('timeout')) {
-            userMsg += 'Превышено время ожидания. Попробуйте позже.';
+            userMsg += 'Превышено время ожидания.';
         } else {
             userMsg += errorMsg;
         }
@@ -576,17 +526,18 @@ async function processJob(job: Job<JobData>): Promise<void> {
 
         metrics.recordFailure();
 
-        // Решение о повторной попытке
         if (isParserError && !(err as ParserError).retryable) {
-            throw new Error('Non-retryable parser error');
+            throw new Error('Non-retryable error');
         }
+
+        throw err;
 
     } finally {
         await cleanupFile(tempFilePath);
     }
 }
 
-// ==================== WORKER ====================
+// ==================== WORKER SETUP ====================
 const worker = new Worker<JobData>(
     'anime-processing',
     processJob,
@@ -595,11 +546,8 @@ const worker = new Worker<JobData>(
             host: process.env.REDIS_HOST || 'localhost',
             port: parseInt(process.env.REDIS_PORT || '6379', 10)
         },
-        concurrency: 2, // Безопасное значение для стабильности
-        limiter: {
-            max: 8,
-            duration: 60000
-        },
+        concurrency: WORKER_CONFIG.CONCURRENCY,
+        limiter: WORKER_CONFIG.RATE_LIMIT,
         settings: {
             backoffStrategy: (attemptsMade: number) => {
                 return Math.min(1000 * Math.pow(2, attemptsMade), 60000);
@@ -630,23 +578,16 @@ async function shutdown() {
     process.exit(0);
 }
 
-let isShuttingDown = false;
-
-process.on('SIGTERM', async () => {
-    isShuttingDown = true;
-    logger.log('[Worker] Graceful shutdown initiated');
-
-    await worker.close(); // Дожидаемся завершения текущих задач
-    if (typeof (redis as any).quit === 'function') {
-        await (redis as any).quit();
-    }
-
-    logger.log('[Worker] Shutdown complete');
-    process.exit(0);
-}); 
+process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
+// Metrics logging
+setInterval(() => {
+    const stats = metrics.getStats();
+    logger.log('[Metrics]', JSON.stringify(stats, null, 2));
+}, WORKER_CONFIG.METRICS_LOG_INTERVAL);
+
 logger.log('[Worker] 🚀 Started');
-logger.log(`[Worker] Concurrency: 2, Rate: 8/min`);
+logger.log(`[Worker] Concurrency: ${WORKER_CONFIG.CONCURRENCY}, Rate: ${WORKER_CONFIG.RATE_LIMIT.max}/min`);
 
 export { worker, metrics };

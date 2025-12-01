@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 import { X, Download, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { useHapticFeedback, useMainButton } from '@telegram-apps/sdk-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api';
 import { useDownloadStore } from '../store/downloadStore';
 
@@ -19,16 +19,13 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
   const addDownload = useDownloadStore(state => state.addDownload);
   const [status, setStatus] = useState<'idle' | 'downloading' | 'success' | 'error'>('idle');
 
-  // 1. ИСПРАВЛЕНИЕ: Деструктурируем mutate и даем ей имя startDownload
-  // Остальные поля нам здесь не нужны, так как статус вы ведете в локальном state
+  // ✅ ИСПРАВЛЕНИЕ: Используем useMutation с правильными зависимостями
   const { mutate: startDownload } = useMutation({
     mutationFn: () => api.downloadEpisode(pageUrl, episode.id, episode.name, animeName),
     
     onMutate: () => {
       setStatus('downloading');
-      if (haptic) {
-        haptic.notificationOccurred('success');
-      }
+      haptic?.notificationOccurred('success');
       
       addDownload({
         id: Date.now().toString(),
@@ -39,50 +36,50 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
         createdAt: new Date()
       });
     },
+    
     onSuccess: () => {
       setStatus('success');
-      if (haptic) {
-        haptic.notificationOccurred('success');
-      }
+      haptic?.notificationOccurred('success');
       
       setTimeout(() => {
         onClose();
       }, 2000);
     },
-    onError: () => {
+    
+    onError: (error) => {
       setStatus('error');
-      if (haptic) {
-        haptic.notificationOccurred('error');
-      }
+      haptic?.notificationOccurred('error');
+      console.error('[DownloadModal] Error:', error);
     }
   });
 
+  // ✅ ИСПРАВЛЕНИЕ: Мемоизируем callback для стабильности
+  const handleDownloadClick = useCallback(() => {
+    if (status === 'idle') {
+      startDownload();
+    }
+  }, [status, startDownload]);
+
+  // ✅ ИСПРАВЛЕНИЕ: Правильные зависимости useEffect
   useEffect(() => {
-    if (!mainButton) return; // Защита если SDK не инициализирован
+    if (!mainButton) return;
 
     if (status === 'idle') {
       mainButton.setText('Download');
       mainButton.show();
       mainButton.enable();
       
-      const onClick = () => {
-        startDownload(); // Используем стабильную функцию
-      };
-      
-      mainButton.on('click', onClick);
+      // Используем on/off вместо onClick для избежания утечек памяти
+      mainButton.on('click', handleDownloadClick);
       
       return () => {
-        mainButton.off('click', onClick);
+        mainButton.off('click', handleDownloadClick);
         mainButton.hide();
       };
     } else {
-      // Скрываем кнопку, если статус не idle (например, уже качается)
       mainButton.hide();
     }
-    
-    // 2. ИСПРАВЛЕНИЕ: В массиве зависимостей ТОЛЬКО примитивы и стабильная функция startDownload.
-    // Убран объект downloadMutation, который вызывал цикл.
-  }, [mainButton, status, startDownload]);
+  }, [mainButton, status, handleDownloadClick]);
 
   return (
     <motion.div
@@ -108,6 +105,7 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
         <button
           onClick={onClose}
           className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center hover:bg-slate-700 transition-colors z-10"
+          aria-label="Close modal"
         >
           <X className="w-5 h-5 text-white" />
         </button>
