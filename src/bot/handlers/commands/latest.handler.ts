@@ -13,7 +13,9 @@ export async function handleLatestCommand(ctx: BotContext) {
   const statusMsg = await ctx.reply('🔍 Загрузка последних релизов...');
 
   try {
-    const items = await getLatestAnime();
+    // Запрашиваем первую страницу
+    const page = 1;
+    const items = await getLatestAnime(page);
 
     if (items.length === 0) {
       return ctx.api.editMessageText(
@@ -23,7 +25,9 @@ export async function handleLatestCommand(ctx: BotContext) {
       );
     }
 
-    const keyboard = buildLatestListKeyboard(items);
+    // Передаем items и номер страницы (1), чтобы клавиатура могла добавить кнопку "Вперед"
+    // (Вам нужно будет обновить buildLatestListKeyboard, чтобы она принимала второй аргумент)
+    const keyboard = buildLatestListKeyboard(items, page);
     const caption = buildLatestListCaption();
 
     await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, caption, {
@@ -32,10 +36,14 @@ export async function handleLatestCommand(ctx: BotContext) {
     });
   } catch (err) {
     logger.error('[Latest Command] Error:', err);
-    await ctx.api.editMessageText(
-      ctx.chat!.id,
-      statusMsg.message_id,
-      '⚠️ Ошибка при загрузке списка. Попробуйте позже.'
-    );
+    try {
+      await ctx.api.editMessageText(
+        ctx.chat!.id,
+        statusMsg.message_id,
+        '⚠️ Ошибка при загрузке списка. Попробуйте позже.'
+      );
+    } catch {
+      // Игнорируем, если сообщение уже удалено
+    }
   }
 }

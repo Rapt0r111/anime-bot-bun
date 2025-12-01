@@ -1,0 +1,52 @@
+{
+    log {
+        level PANIC
+    }
+    email raptorfun111@gmail.com
+    # Временно включаем тестовый режим, чтобы обойти блокировку
+}
+
+rapt0rs.duckdns.org {
+    log {
+            output discard
+        }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        Content-Security-Policy "default-src 'self' https:; script-src 'self' 'unsafe-inline' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://rapt0rs.duckdns.org https://telegram.org; font-src 'self' data:; frame-ancestors 'self' https://web.telegram.org https://telegram.org"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Access-Control-Allow-Origin "*"
+        Access-Control-Allow-Methods "GET, POST, OPTIONS"
+        Access-Control-Allow-Headers "Content-Type, Authorization"
+        -Server
+        -X-Powered-By
+    }
+
+    @options {
+        method OPTIONS
+    }
+    respond @options 204
+
+    reverse_proxy app:8080 {
+        # Убраны лишние header_up, Caddy делает это сам
+        header_up Host {host}
+        
+        transport http {
+            dial_timeout 10s
+            response_header_timeout 30s
+        }
+        
+        health_uri /health
+        health_interval 30s
+        health_timeout 5s
+    }
+
+    encode gzip zstd
+
+    @static {
+        path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2
+    }
+    header @static Cache-Control "public, max-age=31536000, immutable"
+}

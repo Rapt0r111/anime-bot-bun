@@ -161,20 +161,24 @@ export async function fetchHtml(url: string): Promise<string> {
 }
 
 // ==================== LATEST ANIME ====================
-export async function getLatestAnime(options: { forceRefresh?: boolean } = {}): Promise<AnimeCard[]> {
+export async function getLatestAnime(page: number = 1, options: { forceRefresh?: boolean } = {}): Promise<AnimeCard[]> {
     const { forceRefresh = false } = options;
+    const cacheKey = `latest_page_${page}`; // Уникальный ключ для каждой страницы
 
     if (!forceRefresh) {
-        const cached = latestCache.get('latest');
+        const cached = latestCache.get(cacheKey);
         if (cached) {
-            logger.debug(`[Parser] Using cached latest (${cached.length} items)`);
+            logger.debug(`[Parser] Using cached latest page ${page} (${cached.length} items)`);
             return cached;
         }
     }
 
     try {
-        logger.log(`[Parser] Fetching latest from ${BASE_URL}...`);
-        const html = await fetchHtml(BASE_URL);
+        // Формируем URL для пагинации (AnimeVost использует структуру /page/N/)
+        const targetUrl = page > 1 ? `${BASE_URL}/page/${page}/` : BASE_URL;
+        
+        logger.log(`[Parser] Fetching latest from ${targetUrl}...`);
+        const html = await fetchHtml(targetUrl);
         const $ = cheerio.load(html);
         const results: AnimeCard[] = [];
 
@@ -194,15 +198,17 @@ export async function getLatestAnime(options: { forceRefresh?: boolean } = {}): 
         });
 
         if (results.length === 0) {
+            // Если страница пустая, значит мы дошли до конца или ошибка
+            if (page > 1) return []; // Просто вернем пустой массив
             throw new ParserError('No anime found on page', 'NO_RESULTS', true);
         }
 
-        latestCache.set('latest', results);
-        logger.log(`[Parser] Cached ${results.length} latest anime`);
+        latestCache.set(cacheKey, results);
+        logger.log(`[Parser] Cached ${results.length} anime for page ${page}`);
         return results;
     } catch (e) {
         if (e instanceof ParserError) throw e;
-        logger.error("[Parser] Latest Error:", e instanceof Error ? e.message : e);
+        logger.error(`[Parser] Latest Page ${page} Error:`, e instanceof Error ? e.message : e);
         throw new ParserError(
             'Failed to fetch latest anime',
             'FETCH_ERROR',
@@ -345,35 +351,44 @@ export async function getAnimeSeries(pageUrl: string): Promise<AnimePageData> {
 
 // ==================== VIDEO EXTRACTION ====================
 function parseFrame5Links(rawString: string, animeName: string): VideoResult {
-    logger.log(`[Parser] Parsing frame5 links (len: ${rawString.length}): ${truncateForLog(rawString)}`);
+    logger.log(`[Parser] Parsing frame5 links (len: ${rawString.length}): ${rawString}`);
 
     let bestUrls: string[] = [];
     let finalQuality = '480p (SD)';
 
-    // Поиск FHD / 1080p
+    // === ПОИСК 1080p (FHD) ===
     const fhdMatch = rawString.match(/\[FHD\s*\(1080[pр]\)\](.*?)(?:,\[|$)/i);
     if (fhdMatch?.[1]) {
         const urls = extractUrlsFromBlock(fhdMatch[1]);
-        if (urls.length > 0) {
-            bestUrls = urls;
+        
+        // 🔥 ЖЕСТКИЙ ФИЛЬТР: Оставляем только те, где ЕСТЬ "/1080/"
+        // Ссылки типа "site.com/video.mp4" (без качества) будут удалены.
+        const cleanUrls = urls.filter(u => u.includes('/1080/'));
+
+        if (cleanUrls.length > 0) {
+            bestUrls = cleanUrls;
             finalQuality = '1080p (FHD)';
 
-            // Мы нашли 1080p. Возвращаем результат.
-            // Даже если ссылки потом окажутся нерабочими, мы НЕ переходим к 720p/480p.
             return {
                 directUrls: bestUrls,
                 name: animeName,
                 quality: finalQuality
             };
+        } else {
+             logger.warn('[Parser] 1080p block found, but no links contained "/1080/". Skipped to avoid SD fallback.');
         }
     }
 
+    // === ПОИСК 720p (HD) ===
     const hdMatch = rawString.match(/\[HD\s*\(720[pр]\)\](.*?)(?:,\[|$)/i);
-
     if (hdMatch?.[1]) {
         const urls = extractUrlsFromBlock(hdMatch[1]);
-        if (urls.length > 0) {
-            bestUrls = urls;
+        
+        // 🔥 ЖЕСТКИЙ ФИЛЬТР: Оставляем только те, где ЕСТЬ "/720/"
+        const cleanUrls = urls.filter(u => u.includes('/720/'));
+
+        if (cleanUrls.length > 0) {
+            bestUrls = cleanUrls;
             finalQuality = '720p (HD)';
 
             return {
@@ -383,10 +398,12 @@ function parseFrame5Links(rawString: string, animeName: string): VideoResult {
             };
         }
     }
+    
+    // Если качественных ссылок нет — падаем с ошибкой, чтобы не качать 480p
     throw new ParserError(
-        'High quality (1080p/720p) not found. SD (480p) is disabled by config.',
+        'High quality (1080p/720p) not found. Standard Definition (480p) links were ignored.',
         'NO_HIGH_QUALITY_URLS',
-        false // false означает, что нет смысла повторять попытки (retry), если качества нет
+        false 
     );
 }
 

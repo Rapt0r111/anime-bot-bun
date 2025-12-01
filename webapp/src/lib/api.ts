@@ -1,14 +1,42 @@
-﻿import type { AnimeCard, AnimePageData, SearchResult } from '../types';
+﻿// webapp/src/lib/api.ts
 
-// КРИТИЧНО: Определяем базовый URL для API
+import type { AnimeCard, AnimePageData, SearchResult } from '../types';
+
+// Определяем базовый URL
 const API_BASE = import.meta.env.DEV 
-  ? 'http://localhost' 
+  ? 'http://localhost:8080' 
   : 'https://rapt0rs.duckdns.org';
+
+// ВАШ ID ТОЛЬКО ДЛЯ ЛОКАЛЬНОЙ РАЗРАБОТКИ
+
+// Надежная функция получения ID
+const getTelegramUserId = (): number | null => {
+  try {
+    // 1. Проверяем наличие объекта Telegram и пользователя
+    // @ts-ignore
+    const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
+    
+    if (user?.id) {
+      console.log('[API] ✅ Telegram User Detected:', user.id);
+      return user.id;
+    }
+  } catch (err) {
+    console.error('[API] Error accessing Telegram object:', err);
+  }
+
+  // 2. Если пользователя нет, проверяем режим запуска
+  if (import.meta.env.DEV) {
+    console.warn('[API] ⚠️ User not found. Using DEV FALLBACK ID.');
+  }
+
+  // 3. Если это продакшен и пользователя нет — возвращаем null (ошибка)
+  console.error('[API] ❌ User not found in Production mode.');
+  return null;
+};
 
 class ApiClient {
   private async fetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE}${endpoint}`;
-    console.log('[API] Fetching:', url);
     
     try {
       const response = await fetch(url, {
@@ -19,19 +47,20 @@ class ApiClient {
         }
       });
 
-      if (!response.ok) {
-        throw new Error(`API Error: ${response.status} ${response.statusText}`);
-      }
+      const data = await response.json();
 
-      return response.json();
+      if (data.error) throw new Error(data.error);
+      if (!response.ok) throw new Error(`API Error: ${response.status}`);
+
+      return data;
     } catch (error) {
       console.error('[API] Request failed:', error);
       throw error;
     }
   }
 
-  async getLatest(): Promise<AnimeCard[]> {
-    return this.fetch('/api/anime/latest');
+  async getLatest(page: number = 1): Promise<AnimeCard[]> {
+    return this.fetch(`/api/anime/latest?page=${page}`);
   }
 
   async searchAnime(query: string): Promise<SearchResult[]> {
@@ -45,15 +74,32 @@ class ApiClient {
     });
   }
 
-  async downloadEpisode(pageUrl: string, videoId: string, episodeName: string) {
+  // Метод скачивания
+  async downloadEpisode(pageUrl: string, videoId: string, episodeName: string, animeName: string) {
+    const userId = getTelegramUserId();
+    
+    // 🔥 ВАЖНАЯ ПРОВЕРКА
+    if (!userId) {
+      // Эта ошибка всплывет в модальном окне (красный крестик)
+      throw new Error("Не удалось определить пользователя. Пожалуйста, откройте приложение через Telegram.");
+    }
+    
+    console.log(`[API] Sending download request. User: ${userId}, Anime: ${animeName}`);
+
     return this.fetch('/api/anime/download', {
       method: 'POST',
-      body: JSON.stringify({ pageUrl, videoId, episodeName })
+      body: JSON.stringify({ 
+          pageUrl, 
+          videoId, 
+          episodeName, 
+          animeName,
+          userId // Отправляем ID (число)
+      })
     });
   }
 
   async getDownloads() {
-    return this.fetch('/api/downloads');
+    return this.fetch('/api/anime/downloads');
   }
 
   async getStats() {

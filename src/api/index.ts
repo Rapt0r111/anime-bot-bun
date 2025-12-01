@@ -1,3 +1,4 @@
+// src/api/index.ts
 import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { healthRoute } from './routes/health.route';
@@ -5,41 +6,35 @@ import { statsRoute } from './routes/stats.route';
 import { adminRoute } from './routes/admin.route';
 import { webappRoute } from './routes/webapp.route';
 import { logger } from '../utils/logger';
-import { staticPlugin } from '@elysiajs/static';
 
 /**
  * Запуск API сервера с поддержкой WebApp
  */
 export function startApiServer() {
+  const PORT = parseInt(process.env.PORT || '8080', 10); // ✅ Слушаем 8080
+  
   const app = new Elysia()
-    // CORS для WebApp
-    .use(
-      cors({
-        origin: [
-          'http://rapt0rs.duckdns.org',
-          'https://rapt0rs.duckdns.org',
-          'http://localhost:5173'
-        ],
-        credentials: true
-      })
-    )
-    // API Routes (должны быть ПЕРЕД статикой)
+    .use(cors({
+      origin: [
+        'http://rapt0rs.duckdns.org',
+        'https://rapt0rs.duckdns.org',
+        'http://localhost:5173'
+      ],
+      credentials: true
+    }))
     .use(healthRoute)
     .use(statsRoute)
     .use(adminRoute)
     .use(webappRoute)
-    // Static files для WebApp (в production)
     .get('/*', async ({ request, set }) => {
       if (process.env.NODE_ENV === 'production') {
         const url = new URL(request.url);
         const filePath = url.pathname === '/' ? '/index.html' : url.pathname;
         
         try {
-          // Пробуем открыть файл из webapp/dist
           const file = Bun.file(`./webapp/dist${filePath}`);
           
           if (await file.exists()) {
-            // Устанавливаем правильный Content-Type
             const ext = filePath.split('.').pop();
             const contentTypes: Record<string, string> = {
               'html': 'text/html',
@@ -59,7 +54,6 @@ export function startApiServer() {
             return file;
           }
           
-          // Если файл не найден, отдаём index.html (для SPA routing)
           set.headers['Content-Type'] = 'text/html';
           return Bun.file('./webapp/dist/index.html');
           
@@ -70,13 +64,12 @@ export function startApiServer() {
         }
       }
       
-      // В dev режиме ничего не отдаём (Vite dev server работает отдельно)
       set.status = 404;
       return 'Not found';
     })
-    .listen(80);
+    .listen(PORT); // ✅ Используем переменную PORT
 
-  logger.log(`[API] Server running on port ${app.server?.port}`);
+  logger.log(`[API] Server running on port ${PORT}`);
   logger.log(`[API] WebApp API endpoints available at /api/*`);
 
   return app;

@@ -1,3 +1,5 @@
+// webapp/src/components/DownloadModal.tsx
+
 import { motion } from 'framer-motion';
 import { X, Download, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
@@ -20,8 +22,11 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
   const [status, setStatus] = useState<'idle' | 'downloading' | 'success' | 'error'>('idle');
 
   const downloadMutation = useMutation({
-    mutationFn: () => api.downloadEpisode(pageUrl, episode.id, episode.name),
+    // 👇 ИСПРАВЛЕНИЕ ЗДЕСЬ: Добавили 4-й аргумент animeName
+    mutationFn: () => api.downloadEpisode(pageUrl, episode.id, episode.name, animeName),
+    
     onMutate: () => {
+      console.log(123);
       setStatus('downloading');
       if (haptic) {
         haptic.notificationOccurred('success');

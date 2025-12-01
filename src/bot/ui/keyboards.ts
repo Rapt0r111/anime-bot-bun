@@ -11,26 +11,50 @@ import { truncateText } from '../../utils/formatters';
  * Главное меню
  */
 export function buildMainMenuKeyboard(): InlineKeyboard {
+  // По умолчанию открываем 1-ю страницу
   return new InlineKeyboard()
-    .text('🔥 Топ 10 Новинок', 'latest_list')
+    .text('🔥 Топ 10 Новинок', 'latest_list|1') 
     .row()
     .text('🔍 Поиск аниме', 'start_search');
 }
 
 /**
- * Клавиатура для списка последних аниме
+ * Клавиатура для списка последних аниме с пагинацией
  */
-export function buildLatestListKeyboard(items: AnimeCard[]): InlineKeyboard {
+export function buildLatestListKeyboard(items: AnimeCard[], page: number = 1): InlineKeyboard {
   const keyboard = new InlineKeyboard();
-  const top10 = items.slice(0, 10);
-
-  top10.forEach((anime, index) => {
+  
+  // Выводим список (обычно парсер возвращает 10-15 элементов на страницу)
+  items.forEach((anime, index) => {
     const shortId = cacheService.save(anime.url);
     const title = truncateText(anime.title, TEXT_LIMITS.MAX_TITLE);
+    
+    // Формат: select_latest | ID ссылки | индекс | 0 (страница серий)
     keyboard
       .text(`${index + 1}. ${title}`, `select_latest|${shortId}|${index}|0`)
       .row();
   });
+
+  // --- Блок пагинации ---
+  const navRow: { text: string; callback_data: string }[] = [];
+
+  // Кнопка Назад
+  if (page > 1) {
+    navRow.push({ text: '⬅️', callback_data: `latest_list|${page - 1}` });
+  }
+
+  // Индикатор страницы
+  navRow.push({ text: `Стр. ${page}`, callback_data: 'noop' });
+
+  // Кнопка Вперед 
+  // Если элементов меньше 10, скорее всего это последняя страница
+  if (items.length >= 10) {
+    navRow.push({ text: '➡️', callback_data: `latest_list|${page + 1}` });
+  }
+
+  if (navRow.length > 0) {
+    keyboard.row(...navRow);
+  }
 
   keyboard.text('❌ Закрыть', 'cancel');
   return keyboard;
@@ -70,7 +94,7 @@ export function buildEpisodeButtons(
 }
 
 /**
- * Кнопки пагинации страниц
+ * Кнопки пагинации страниц (внутри выбора серий)
  */
 export function addPaginationButtons(
   keyboard: InlineKeyboard,
@@ -112,21 +136,22 @@ export function addPaginationButtons(
 }
 
 /**
- * Кнопки навигации между аниме (в списке новинок)
+ * Кнопки навигации между аниме (в детальном просмотре)
  */
 export function addAnimeNavigationButtons(
   keyboard: InlineKeyboard,
   animeList: AnimeCard[],
   currentIndex: number
 ): void {
-  const top10 = animeList.slice(0, 10);
-
-  if (currentIndex < 0 || currentIndex >= top10.length) return;
+  // Навигация работает только в рамках текущей загруженной страницы (top items)
+  // Для глобальной навигации нужно усложнять логику, пока оставим локальную
+  
+  if (currentIndex < 0 || currentIndex >= animeList.length) return;
 
   const row: { text: string; callback_data: string }[] = [];
 
   if (currentIndex > 0) {
-    const prevItem = top10[currentIndex - 1];
+    const prevItem = animeList[currentIndex - 1];
     if (prevItem) {
       const prevId = cacheService.save(prevItem.url);
       row.push({
@@ -136,8 +161,8 @@ export function addAnimeNavigationButtons(
     }
   }
 
-  if (currentIndex < top10.length - 1) {
-    const nextItem = top10[currentIndex + 1];
+  if (currentIndex < animeList.length - 1) {
+    const nextItem = animeList[currentIndex + 1];
     if (nextItem) {
       const nextId = cacheService.save(nextItem.url);
       row.push({

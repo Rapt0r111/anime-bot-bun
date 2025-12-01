@@ -1,4 +1,27 @@
 services:
+  # ============================================
+  # CADDY - Автоматический HTTPS + Reverse Proxy
+  # ============================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: anime_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"      # HTTP (для перенаправления на HTTPS)
+      - "443:443"    # HTTPS
+      - "443:443/udp" # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - anime_network
+    depends_on:
+      - app
+
+  # ============================================
+  # APP - Основное приложение (теперь внутренний порт)
+  # ============================================
   app:
     build: 
       context: .
@@ -17,10 +40,10 @@ services:
       NODE_ENV: production
       TZ: Europe/Moscow
       WEBAPP_URL: ${WEBAPP_URL:-https://rapt0rs.duckdns.org}
+      PORT: "8080"  # ✅ Добавьте эту строку
     volumes:
       - ./temp:/app/temp
-    ports:
-      - "80:8080"
+    # Убираем внешний порт - теперь только внутренний
     networks:
       - anime_network
     logging:
@@ -37,6 +60,9 @@ services:
           cpus: '0.5'
           memory: 512M
 
+  # ============================================
+  # WORKER
+  # ============================================
   worker:
     build:
       context: .
@@ -74,6 +100,9 @@ services:
           cpus: '1'
           memory: 1G
 
+  # ============================================
+  # TELEGRAM API
+  # ============================================
   telegram-api:
     image: aiogram/telegram-bot-api:latest
     container_name: local_tg_api
@@ -90,6 +119,9 @@ services:
     networks:
       - anime_network
 
+  # ============================================
+  # POSTGRES
+  # ============================================
   postgres:
     image: postgres:16-alpine
     container_name: anime_postgres
@@ -111,6 +143,9 @@ services:
     networks:
       - anime_network
 
+  # ============================================
+  # REDIS
+  # ============================================
   redis:
     image: redis:7-alpine
     container_name: anime_redis
@@ -142,3 +177,5 @@ volumes:
   pg_data:
   redis_data:
   telegram-data:
+  caddy_data:    # Для SSL сертификатов
+  caddy_config:  # Для конфигурации Caddy

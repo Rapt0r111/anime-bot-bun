@@ -49,7 +49,7 @@ bot.command('app', handleWebAppCommand);
 
 
 // ==================== REGISTER CALLBACKS ====================
-bot.callbackQuery('latest_list', handleLatestListCallback);
+bot.callbackQuery(/^latest_list/, handleLatestListCallback);
 bot.callbackQuery('start_search', async (ctx) => {
   await ctx.answerCallbackQuery('Просто напишите название аниме в чат!');
 });

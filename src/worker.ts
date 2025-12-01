@@ -387,6 +387,23 @@ async function processJob(job: Job<JobData>): Promise<void> {
 
     const targetChatId = chatId || userId;
     logger.log(`[Worker] === JOB ${job.id}: ${epName} ===`);
+    logger.log(`[Worker] Debug IDs -> User: ${userId}, Chat: ${chatId}, Target: ${targetChatId}`);
+
+    if (!targetChatId || targetChatId === 0) {
+        const err = `Invalid Target Chat ID: ${targetChatId}. Job data missing valid userId or chatId.`;
+        logger.error(`[Worker] ❌ FATAL: ${err}`);
+
+        // Помечаем в базе как ошибку, если есть recordId
+        if (recordId) {
+            await updateDatabase(recordId, {
+                isProcessing: false,
+                hasError: true,
+                errorMessage: "Internal Error: User ID missing"
+            });
+        }
+        // Завершаем выполнение, не скачивая файл
+        return;
+    }
 
     const updateStatus = createStatusUpdater(targetChatId, startMsgId);
     let tempFilePath = '';
