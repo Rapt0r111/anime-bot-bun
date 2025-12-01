@@ -12,6 +12,7 @@ import { Readable } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
 import { logger } from './utils/logger';
+import { redis } from 'bun';
 
 const SHARED_DIR = '/var/lib/telegram-bot-api/shared';
 const MAX_ATTEMPTS = 5;
@@ -282,6 +283,14 @@ async function downloadVideo(
             }, STALL_CHECK_INTERVAL);
 
             const fileStream = createWriteStream(tempFilePath);
+
+            fileStream.on('error', (err: NodeJS.ErrnoException) => {
+                if (err.code === 'ENOSPC') {
+                    logger.error('[Worker] Disk full!');
+                    throw new Error('Server storage full. Try again later.');
+                }
+                throw err;
+            });
             const readable = Readable.fromWeb(response.body as any);
 
             // Progress tracking
@@ -621,7 +630,20 @@ async function shutdown() {
     process.exit(0);
 }
 
-process.on('SIGTERM', shutdown);
+let isShuttingDown = false;
+
+process.on('SIGTERM', async () => {
+    isShuttingDown = true;
+    logger.log('[Worker] Graceful shutdown initiated');
+
+    await worker.close(); // Дожидаемся завершения текущих задач
+    if (typeof (redis as any).quit === 'function') {
+        await (redis as any).quit();
+    }
+
+    logger.log('[Worker] Shutdown complete');
+    process.exit(0);
+}); 
 process.on('SIGINT', shutdown);
 
 logger.log('[Worker] 🚀 Started');

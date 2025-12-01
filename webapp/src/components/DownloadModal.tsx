@@ -1,5 +1,4 @@
 // webapp/src/components/DownloadModal.tsx
-
 import { motion } from 'framer-motion';
 import { X, Download, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
@@ -21,12 +20,11 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
   const addDownload = useDownloadStore(state => state.addDownload);
   const [status, setStatus] = useState<'idle' | 'downloading' | 'success' | 'error'>('idle');
 
-  const downloadMutation = useMutation({
-    // 👇 ИСПРАВЛЕНИЕ ЗДЕСЬ: Добавили 4-й аргумент animeName
+  // 1. Деструктурируем mutate и переименуем для удобства
+  const { mutate: startDownload } = useMutation({
     mutationFn: () => api.downloadEpisode(pageUrl, episode.id, episode.name, animeName),
     
     onMutate: () => {
-      console.log(123);
       setStatus('downloading');
       if (haptic) {
         haptic.notificationOccurred('success');
@@ -60,23 +58,34 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
   });
 
   useEffect(() => {
-    if (mainButton && status === 'idle') {
+    // Если MainButton недоступен (например, не в Telegram), ничего не делаем
+    if (!mainButton) return;
+
+    if (status === 'idle') {
+      // 2. Настраиваем кнопку только когда статус idle
       mainButton.setText('Download');
       mainButton.show();
       mainButton.enable();
       
       const onClick = () => {
-        downloadMutation.mutate();
+        // Вызываем стабильную функцию startDownload
+        startDownload();
       };
       
       mainButton.on('click', onClick);
       
+      // Очистка при размонтировании или смене статуса
       return () => {
         mainButton.off('click', onClick);
         mainButton.hide();
       };
+    } else {
+      // 3. Явно скрываем кнопку, если статус изменился (качаем или ошибка)
+      mainButton.hide();
     }
-  }, [mainButton, status, downloadMutation]);
+    
+    // 4. В зависимостях теперь только стабильные переменные и примитивы
+  }, [mainButton, status, startDownload]); 
 
   return (
     <motion.div
@@ -159,6 +168,16 @@ export default function DownloadModal({ episode, animeName, pageUrl, onClose }: 
               </p>
             )}
           </motion.div>
+
+          {/* Дополнительная кнопка на случай, если пользователь с ПК и MainButton не виден */}
+          {status === 'idle' && !mainButton && (
+             <button 
+                onClick={() => startDownload()}
+                className="w-full mt-6 py-3 bg-purple-600 rounded-xl text-white font-bold"
+             >
+                Download
+             </button>
+          )}
 
           <div className="mt-6 flex items-center justify-center gap-2">
             <div className="px-3 py-1 bg-purple-600/20 rounded-full text-purple-300 text-xs font-medium">

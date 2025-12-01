@@ -46,7 +46,7 @@ export const episodes = pgTable('episodes', {
 
 export const subscribers = pgTable('subscribers', {
   id: serial('id').primaryKey(),
-  chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+  chatId: bigint('chat_id', { mode: 'bigint' }).notNull(),
   username: text('username'),
   firstName: text('first_name'),
   lastName: text('last_name'),

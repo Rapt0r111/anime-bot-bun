@@ -130,8 +130,12 @@ async function gracefulShutdown(signal: string): Promise<void> {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('[Bot] Unhandled Rejection at:', promise, 'reason:', reason);
+process.on('unhandledRejection', async (reason, promise) => {
+  logger.error('[FATAL] Unhandled Rejection:', reason);
+  
+  // Graceful shutdown
+  await gracefulShutdown('UNHANDLED_REJECTION');
+  process.exit(1);
 });
 
 process.on('uncaughtException', (error) => {

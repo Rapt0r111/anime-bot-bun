@@ -227,7 +227,8 @@ export async function searchAnime(query: string): Promise<SearchResult[]> {
         const params = new URLSearchParams();
         params.append('do', 'search');
         params.append('subaction', 'search');
-        params.append('story', query);
+        const sanitized = query.replace(/[<>\"']/g, '');
+        params.append('story', sanitized);
 
         const response = await axios.post(`${BASE_URL}/index.php?do=search`, params, {
             headers: HEADERS,
